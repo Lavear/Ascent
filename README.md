@@ -1,10 +1,10 @@
-# ASCENT: Approximate and Sparse Compute Engine for Neural Tasks
+# ASCENT: Approximate and Sparse Compute Engine for Neural Tensors
 
 ![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen)
 ![Target](https://img.shields.io/badge/Target-ASIC%20%7C%20FPGA-blue)
 ![Language](https://img.shields.io/badge/Language-Verilog%20%7C%20Python-orange)
 
-**ASCENT** (formerly EcoMAC) is a hardware-efficient neural network accelerator designed for low-power Edge AI applications. It directly addresses the memory-wall bottleneck and high dynamic power consumption of traditional AI hardware by integrating three core architectural pillars: **Digital Compute-in-Memory (CIM)**, **Sparse-Aware Scheduling**, and **Approximate Computing**.
+**ASCENT** is a hardware-efficient neural network accelerator designed for low-power Edge AI applications. It directly addresses the memory-wall bottleneck and high dynamic power consumption of traditional AI hardware by integrating three core architectural pillars: **Digital Compute-in-Memory (CIM)**, **Sparse-Aware Scheduling**, and **Approximate Computing**.
 
 This project implements an end-to-end flow from software-level model optimization (pruning and quantization) to RTL design, verification, and ASIC synthesis.
 
