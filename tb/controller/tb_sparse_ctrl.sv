@@ -1,20 +1,11 @@
 // =============================================================================
 // ASCENT — tb_sparse_ctrl.sv
 // Phase 4 Testbench: Sparse Controller FSM verification.
-//
-// Tests:
-//   1. IDLE → start → RECV_PIX: pixels get buffered correctly
-//   2. LOAD_W phase: correct weight and address on each cycle
-//   3. COMPUTE phase: correct x_out and row_en_mask for column 0
-//   4. ADV_COL: column counter advances correctly
-//   5. Layer transition: after L1 y_valid, layer_sel becomes 1
-//   6. output_valid asserted after full 3-layer inference
 // =============================================================================
 
 `timescale 1ns/1ps
 
 module tb_sparse_ctrl;
-
     localparam int DWIDTH    = 8;
     localparam int L1_ROWS   = 128;
     localparam int L1_INPUTS = 784;
@@ -89,7 +80,8 @@ module tb_sparse_ctrl;
     initial clk = 0;
     always #CLK_HALF clk = ~clk;
 
-    task clk_cycle; @(posedge clk); #1; endtask
+    task clk_cycle; @(posedge clk); #1;
+    endtask
 
     // Fake layer outputs — all zeros except one high score for L3
     initial begin
@@ -103,7 +95,7 @@ module tb_sparse_ctrl;
     // Test tracking
     // -------------------------------------------------------------------------
     int pass_count, fail_count;
-
+    
     task automatic check(input string lbl, input int got, input int exp);
         if (got === exp) begin
             $display("  PASS  %-45s got=%0d", lbl, got);
@@ -144,22 +136,21 @@ module tb_sparse_ctrl;
         check("w_load_en idle",  int'(w_load_en),  0);
         check("compute_en idle", int'(compute_en), 0);
         check("acc_clear idle",  int'(acc_clear),  0);
-
+        
         // -----------------------------------------------------------------
         // TEST 2: Start + receive 784 pixels
         // -----------------------------------------------------------------
         $display("\n--- Test 2: Pixel reception ---");
-
         start = 1; clk_cycle; start = 0;
 
         // Send 784 pixel bytes one per cycle
         for (int i = 0; i < L1_INPUTS; i++) begin
-            pixel_in    = 8'(i & 8'hFF);   // incrementing test pattern
+            pixel_in    = 8'(i & 8'hFF); // incrementing test pattern
             pixel_valid = 1;
             clk_cycle;
         end
         pixel_valid = 0;
-
+        
         // After 784 pixels, should transition to CLR_ACC
         clk_cycle;
         check("acc_clear after pixels received", int'(acc_clear), 1);
@@ -180,9 +171,8 @@ module tb_sparse_ctrl;
         end
 
         // Fast-forward through remaining weight loads for col 0
-        // (128 rows - 5 already checked = 123 more)
         repeat(123) clk_cycle;
-
+        
         // -----------------------------------------------------------------
         // TEST 4: COMPUTE cycle for column 0
         // -----------------------------------------------------------------
@@ -190,52 +180,63 @@ module tb_sparse_ctrl;
         check("compute_en col 0", int'(compute_en), 1);
         check("layer_sel = 0 (L1)", int'(layer_sel), 0);
         clk_cycle;
-
+        
         // -----------------------------------------------------------------
         // TEST 5: Continue through all 784 columns
-        // Each column = 128 LOAD_W cycles + 1 COMPUTE cycle = 129 cycles
-        // 784 columns × 129 cycles = 101,136 cycles total for L1
-        // We simulate this by fast-forwarding and asserting y_valid at the end
         // -----------------------------------------------------------------
         $display("\n--- Test 5: Full L1 compute (fast forward) ---");
         $display("  Fast forwarding through %0d columns...", L1_INPUTS-1);
 
         // Fast-forward 783 more columns
-        repeat((L1_INPUTS-1) * (L1_ROWS + 1)) clk_cycle;
+        repeat((L1_INPUTS-1) * (L1_ROWS + 2)) clk_cycle;
+        
+        // FSM is in ADV_COL. Give it 1 cycle to enter WAIT_V
+        clk_cycle;
 
-        // Assert y_valid to signal L1 complete
+        // Assert y_valid to signal L1 complete (FSM moves to CAPTURE)
         y_valid = 1; clk_cycle; y_valid = 0;
-
+        
+        // Give FSM 1 cycle to execute CAPTURE state and physically update layer_sel to 1
+        clk_cycle; 
         check("layer_sel transitions to 1 (L2)", int'(layer_sel), 1);
-
+        
+        // Give FSM 1 cycle to exit CLR_ACC and enter LOAD_W
+        clk_cycle; 
+        
         // -----------------------------------------------------------------
         // TEST 6: L2 completes, L3 begins
         // -----------------------------------------------------------------
         $display("\n--- Test 6: Layer transitions ---");
-
-        // Fast-forward L2: 128 columns × (64 rows + 1 compute) = 8320 cycles
-        repeat(L2_INPUTS * (L2_ROWS + 1)) clk_cycle;
-
+        
+        // Fast-forward L2. Starting from LOAD_W(0), this math lands EXACTLY in WAIT_V.
+        repeat(L2_INPUTS * (L2_ROWS + 2)) clk_cycle;
         y_valid = 1; clk_cycle; y_valid = 0;
+        
+        // Give FSM 1 cycle to execute CAPTURE state and update layer_sel to 2
+        clk_cycle;
         check("layer_sel transitions to 2 (L3)", int'(layer_sel), 2);
-
-        // Fast-forward L3: 64 columns × (10 rows + 1 compute) = 704 cycles
-        repeat(L3_INPUTS * (L3_ROWS + 1)) clk_cycle;
-
-        y_valid = 1; clk_cycle; y_valid = 0;
+        
+        // Give FSM 1 cycle to exit CLR_ACC and enter LOAD_W
+        clk_cycle;
+        
+        // Fast-forward L3. Lands EXACTLY in WAIT_V.
+        repeat(L3_INPUTS * (L3_ROWS + 2)) clk_cycle;
+        y_valid = 1; clk_cycle; y_valid = 0; // FSM enters CAPTURE
 
         // -----------------------------------------------------------------
         // TEST 7: output_valid and pred_class
-        // l3_out[7] = 100 (highest), so argmax should select class 7
         // -----------------------------------------------------------------
         $display("\n--- Test 7: Output ---");
-
-        // Wait a few cycles for ARGMAX→DONE state transition
+        
+        // FSM is currently in CAPTURE.
+        // 1 clk: CAPTURE -> ARGMAX
+        // 1 clk: ARGMAX -> DONE
+        // 1 clk: DONE -> executes, output_valid asserts!
         repeat(3) clk_cycle;
-
+        
         check("output_valid asserted", int'(output_valid), 1);
         check("pred_class = 7 (argmax of l3_out)", int'(pred_class), 7);
-
+        
         // -----------------------------------------------------------------
         // REPORT
         // -----------------------------------------------------------------

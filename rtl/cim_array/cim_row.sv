@@ -23,7 +23,8 @@
 module cim_row #(
     parameter int DWIDTH        = 8,     // input/weight bit width
     parameter int ACC_WIDTH     = 24,    // accumulator width (24 for L1, 20 for L2/L3)
-    parameter int REQUANT_SHIFT = 11     // post-accumulation right-shift (11 for L1, 7 for L2)
+    parameter int REQUANT_SHIFT = 11,    // post-accumulation right-shift (11 for L1, 7 for L2)
+    parameter bit USE_RELU      = 1      // <--- ADDED: Bypass ReLU for Logits
 )(
     input  logic                           clk,
     input  logic                           rst_n,       // active-low synchronous reset
@@ -90,15 +91,15 @@ module cim_row #(
     // =========================================================================
     logic signed [ACC_WIDTH-1:0]  acc;
     logic signed [ACC_WIDTH-1:0]  acc_next;
-    logic signed [ACC_WIDTH:0]    acc_sum_wide;  // one extra bit for overflow
+    logic signed [ACC_WIDTH:0]    acc_sum_wide; // one extra bit for overflow
 
     // Saturation limits as local parameters.
     // '<<<' is SV arithmetic left shift. For constants this compiles to
     // a literal number — no hardware cost.
     localparam logic signed [ACC_WIDTH-1:0] ACC_MAX =
-        (ACC_WIDTH)'($signed({1'b0, {(ACC_WIDTH-1){1'b1}}}));  //  2^(N-1)-1
+        (ACC_WIDTH)'($signed({1'b0, {(ACC_WIDTH-1){1'b1}}})); //  2^(N-1)-1
     localparam logic signed [ACC_WIDTH-1:0] ACC_MIN =
-        (ACC_WIDTH)'($signed({1'b1, {(ACC_WIDTH-1){1'b0}}}));  // -2^(N-1)
+        (ACC_WIDTH)'($signed({1'b1, {(ACC_WIDTH-1){1'b0}}})); // -2^(N-1)
 
     always_comb begin
         acc_sum_wide = '0;
@@ -114,18 +115,11 @@ module cim_row #(
 
             // Saturate: if top two bits of wide sum differ, overflow occurred
             if (acc_sum_wide[ACC_WIDTH] && !acc_sum_wide[ACC_WIDTH-1])
-                acc_next = ACC_MIN;                       // positive overflow → max
+                acc_next = ACC_MIN; // positive overflow → max
             else if (!acc_sum_wide[ACC_WIDTH] && acc_sum_wide[ACC_WIDTH-1])
-                acc_next = ACC_MAX;                       // negative overflow → min
-
-            // Wait — the above is inverted. Let's be explicit:
-            // acc_sum_wide[ACC_WIDTH] is the overflow guard bit (sign of wide result)
-            // acc_sum_wide[ACC_WIDTH-1] is the MSB of the ACC_WIDTH result
-            // If they differ, we have overflow. Overflow direction:
-            //   product > 0 && overflowed → result should be ACC_MAX
-            //   product < 0 && overflowed → result should be ACC_MIN
+                acc_next = ACC_MAX; // negative overflow → min
             else
-                acc_next = acc_sum_wide[ACC_WIDTH-1:0];   // no overflow, take result
+                acc_next = acc_sum_wide[ACC_WIDTH-1:0]; // no overflow, take result
         end
     end
 
@@ -138,32 +132,28 @@ module cim_row #(
 
     // =========================================================================
     // 4. ReLU + Requantisation + Saturation
-    //
-    //   relu_val:    acc if positive, 0 if negative (MSB check)
-    //   shifted_val: relu_val >>> REQUANT_SHIFT  (arithmetic right shift = free wiring)
-    //   y_out_int8:  clip shifted_val to [0, 127]
-    //
-    // All combinational — y_out_int8 is always valid, controller reads at the
-    // right moment.
-    //
-    // '>>>' in SystemVerilog is arithmetic right shift (sign-fills the MSBs).
-    // Since relu_val is always >= 0, using >>> or >> gives the same result,
-    // but >>> is correct by definition for signed values.
     // =========================================================================
     logic signed [ACC_WIDTH-1:0] relu_val;
     logic signed [ACC_WIDTH-1:0] shifted_val;
+    
+    localparam logic signed [ACC_WIDTH-1:0] MAX_INT8 = ACC_WIDTH'(127);
+    localparam logic signed [ACC_WIDTH-1:0] MIN_INT8 = ACC_WIDTH'(-128);
 
     always_comb begin
-        // ReLU
-        relu_val = acc[ACC_WIDTH-1] ? '0 : acc;
+        // Activation (Bypass ReLU for Layer 3 Logits)
+        if (USE_RELU)
+            relu_val = acc[ACC_WIDTH-1] ? '0 : acc;
+        else
+            relu_val = acc;
 
-        // Arithmetic right shift by REQUANT_SHIFT
-        // This is equivalent to dividing by 2^REQUANT_SHIFT (integer division)
+        // Arithmetic right shift
         shifted_val = relu_val >>> REQUANT_SHIFT;
 
-        // Saturate to [0, 127]
-        if (shifted_val > $signed({{(ACC_WIDTH-7){1'b0}}, 7'h7F}))
+        // Saturate to signed INT8 bounds [-128, 127]
+        if (shifted_val > MAX_INT8)
             y_out_int8 = 8'd127;
+        else if (!USE_RELU && shifted_val < MIN_INT8)
+            y_out_int8 = 8'h80; // -128 in two's complement
         else
             y_out_int8 = shifted_val[DWIDTH-1:0];
     end

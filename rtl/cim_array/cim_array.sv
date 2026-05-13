@@ -29,7 +29,8 @@ module cim_array #(
     parameter int ROWS          = 128,
     parameter int ACC_WIDTH     = 24,
     parameter int REQUANT_SHIFT = 11,
-    parameter int NUM_INPUTS    = 784
+    parameter int NUM_INPUTS    = 784,
+    parameter bit USE_RELU      = 1       // <--- NEW: Bypass ReLU for Logits
 )(
     input  logic                              clk,
     input  logic                              rst_n,
@@ -82,7 +83,8 @@ module cim_array #(
             cim_row #(
                 .DWIDTH        (DWIDTH),
                 .ACC_WIDTH     (ACC_WIDTH),
-                .REQUANT_SHIFT (REQUANT_SHIFT)
+                .REQUANT_SHIFT (REQUANT_SHIFT),
+                .USE_RELU      (USE_RELU)     // <--- NEW: Pass parameter to row
             ) u_row (
                 .clk         (clk),
                 .rst_n       (rst_n),
