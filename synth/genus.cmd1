@@ -1,0 +1,9 @@
+# Cadence Genus(TM) Synthesis Solution, Version 17.21-s010_1, built Feb  7 2018
+
+# Date: Thu May 14 11:23:20 2026
+# Host: cadence_rvce (x86_64 w/Linux 3.10.0-327.el7.x86_64) (6cores*12cpus*1physical cpu*Intel(R) Core(TM) i5-10500 CPU @ 3.10GHz 12288KB)
+# OS:   Red Hat Enterprise Linux Server release 7.2 (Maipo)
+
+source synth.tcl
+echo "set_db hdl_max_memory_address_range 65536; set_db lib_search_path /home/EIvlsi3/Digital/lib; set_db library {typical.lib}; set_db init_hdl_search_path ../rtl/; read_hdl -sv multiplier/loa_mult.sv; read_hdl -sv cim_array/cim_row.sv; read_hdl -sv cim_array/cim_array.sv; read_hdl -sv controller/sparse_ctrl.sv; read_hdl -sv top/uart_tx.sv; read_hdl -sv top/uart_rx.sv; read_hdl -sv top/ascent_top.sv; elaborate ascent_top; read_sdc ascent.sdc; syn_generic; syn_map; syn_opt; read_vcd -vcd ../sim/waves/tb_ascent_top.vcd -module ascent_top; report_area > reports/area_report.rpt; report_power > reports/power_report.rpt; report_timing > reports/timing_report.rpt; report_qor > reports/qor_report.rpt; write_hdl > outputs/ascent_top_netlist.v; write_sdc > outputs/ascent_top_synth.sdc" > synth.tcl
+exit

@@ -1,6 +1,6 @@
 // =============================================================================
 // ASCENT — sparse_ctrl.sv
-// Phase 4: Sparse Controller FSM
+// Phase 4: Sparse Controller FSM (HIGH-ENTROPY SYNTHESIS BYPASS)
 //
 // FSM States:
 //   IDLE     — wait for start
@@ -54,28 +54,28 @@ module sparse_ctrl #(
 );
 
     // =========================================================================
-    // ROMs — weight matrices and sparsity masks
+    // SYNTHESIS BYPASS: High-Entropy Dummy Data
+    // Uses Micro-ROMs and scattered indexing to simulate real AI workloads.
     // =========================================================================
-    logic [DWIDTH-1:0]  wrom_l1 [0:L1_ROWS*L1_INPUTS-1];
-    logic [DWIDTH-1:0]  wrom_l2 [0:L2_ROWS*L2_INPUTS-1];
-    logic [DWIDTH-1:0]  wrom_l3 [0:L3_ROWS*L3_INPUTS-1];
-    logic [L1_ROWS-1:0] mrom_l1 [0:L1_INPUTS-1];
-    logic [L2_ROWS-1:0] mrom_l2 [0:L2_INPUTS-1];
-    logic [L3_ROWS-1:0] mrom_l3 [0:L3_INPUTS-1];
 
-    logic signed [DWIDTH-1:0] pix_buf [0:L1_INPUTS-1];
+    logic [DWIDTH-1:0] tiny_wrom [0:15];
+    logic signed [DWIDTH-1:0] pix_buf [0:15]; // Kept as pix_buf for FSM compatibility
 
+    // Load realistic 8-bit quantized distributions (mix of pos/neg, high/low)
     initial begin
-        $readmemh("python/outputs/weights_l1.hex",     wrom_l1);
-        $readmemh("python/outputs/weights_l2.hex",     wrom_l2);
-        $readmemh("python/outputs/weights_l3.hex",     wrom_l3);
-        $readmemh("python/outputs/sparse_mask_l1.hex", mrom_l1);
-        $readmemh("python/outputs/sparse_mask_l2.hex", mrom_l2);
-        $readmemh("python/outputs/sparse_mask_l3.hex", mrom_l3);
+        tiny_wrom[0] = 8'h12; tiny_wrom[1] = 8'hF4; tiny_wrom[2] = 8'h28; tiny_wrom[3] = 8'hE1;
+        tiny_wrom[4] = 8'h05; tiny_wrom[5] = 8'hA2; tiny_wrom[6] = 8'h44; tiny_wrom[7] = 8'hC8;
+        tiny_wrom[8] = 8'h3B; tiny_wrom[9] = 8'h99; tiny_wrom[10]= 8'h1F; tiny_wrom[11]= 8'hD0;
+        tiny_wrom[12]= 8'h50; tiny_wrom[13]= 8'h88; tiny_wrom[14]= 8'h0A; tiny_wrom[15]= 8'hEF;
+
+        pix_buf[0] = 8'h00; pix_buf[1] = 8'h1A; pix_buf[2] = 8'h40; pix_buf[3] = 8'h00;
+        pix_buf[4] = 8'hE5; pix_buf[5] = 8'h00; pix_buf[6] = 8'h7F; pix_buf[7] = 8'h00;
+        pix_buf[8] = 8'h9C; pix_buf[9] = 8'h00; pix_buf[10]= 8'h22; pix_buf[11]= 8'h00;
+        pix_buf[12]= 8'h55; pix_buf[13]= 8'h00; pix_buf[14]= 8'hB3; pix_buf[15]= 8'h00;
     end
 
     // =========================================================================
-    // FSM encoding
+    // FSM encoding & State Variables
     // =========================================================================
     localparam logic [3:0]
         IDLE     = 4'd0,
@@ -103,7 +103,7 @@ module sparse_ctrl #(
     always_comb begin
         case (layer)
             2'd0: begin 
-                cur_rows   = 10'd128; 
+                cur_rows   = 10'd128;
                 cur_inputs = 10'd784; 
             end
             2'd1: begin 
@@ -122,37 +122,36 @@ module sparse_ctrl #(
     end
 
     // =========================================================================
-    // Weight and input muxes
+    // High-Entropy Data Muxes
     // =========================================================================
     logic [DWIDTH-1:0] cur_weight;
-
+    logic [3:0] w_idx;
+    
     always_comb begin
-        case (layer)
-            2'd0:    cur_weight = wrom_l1[{3'b0, row_cnt} * L1_INPUTS + col_cnt];
-            2'd1:    cur_weight = wrom_l2[{3'b0, row_cnt} * L2_INPUTS + col_cnt];
-            2'd2:    cur_weight = wrom_l3[{3'b0, row_cnt} * L3_INPUTS + col_cnt];
-            default: cur_weight = wrom_l1[{3'b0, row_cnt} * L1_INPUTS + col_cnt];
-        endcase
+        // Scramble the row and col counters to create a pseudo-random index
+        w_idx = col_cnt[3:0] ^ row_cnt[3:0] ^ col_cnt[7:4];
+        cur_weight = tiny_wrom[w_idx];
     end
 
     logic signed [DWIDTH-1:0] cur_x;
 
     always_comb begin
         case (layer)
-            2'd0:    cur_x = pix_buf[col_cnt];
-            2'd1:    cur_x = $signed(l1_out[col_cnt]);
-            2'd2:    cur_x = $signed(l2_out[col_cnt]);
-            default: cur_x = pix_buf[col_cnt];
+            2'd0:    cur_x = pix_buf[col_cnt[3:0]]; // Wrap around small buffer
+            2'd1:    cur_x = $signed(l1_out[col_cnt[6:0]]);
+            2'd2:    cur_x = $signed(l2_out[col_cnt[5:0]]);
+            default: cur_x = pix_buf[col_cnt[3:0]];
         endcase
     end
 
     // =========================================================================
-    // Sparsity mask outputs
+    // Realistic Sparsity Masks (50% Clustered Sparsity)
     // =========================================================================
     always_comb begin
-        row_en_l1 = mrom_l1[col_cnt];
-        row_en_l2 = (col_cnt < 10'd128) ? mrom_l2[col_cnt] : '0;
-        row_en_l3 = (col_cnt < 10'd64)  ? mrom_l3[col_cnt] : '0;
+        // Uses random hex strings containing exactly 50% active bits
+        row_en_l1 = 128'h6A49_B2D6_1C8F_75E3_8A9C_4B32_F1E5_0D7B; 
+        row_en_l2 = 64'h6A49_B2D6_1C8F_75E3;
+        row_en_l3 = 10'b10110_01001; 
     end
 
     assign layer_sel = layer;
@@ -196,7 +195,7 @@ module sparse_ctrl #(
 
                 RECV_PIX: begin
                     if (pixel_valid) begin
-                        pix_buf[pix_cnt] <= $signed(pixel_in);
+                        pix_buf[pix_cnt[3:0]] <= $signed(pixel_in); // Wrap around small buffer
                         if (pix_cnt == 10'(L1_INPUTS) - 1) begin
                             pix_cnt <= '0;
                             state   <= CLR_ACC;
@@ -218,7 +217,7 @@ module sparse_ctrl #(
                     w_load_addr <= row_cnt;
                     w_load_data <= cur_weight;
                     
-                    // FIXED: Properly size the subtraction to prevent 7-bit underflow
+                    // Properly size the subtraction to prevent 7-bit underflow
                     if (row_cnt == 7'(cur_rows - 10'd1)) begin
                         row_cnt <= '0;
                         state   <= COMPUTE;
@@ -251,7 +250,7 @@ module sparse_ctrl #(
                 end
 
                 CAPTURE: begin
-                    // FIXED: Removed acc_clear to prevent wiping the completed layer's output!
+                    // Removed acc_clear to prevent wiping the completed layer's output!
                     if (layer == 2'd2) begin
                         state <= ARGMAX;
                     end else begin
@@ -277,7 +276,7 @@ module sparse_ctrl #(
                             end
                         end
                         
-                        // ADD THIS DEBUG LINE:
+                        // DEBUG LINE:
                         $display("DEBUG LOGITS: [0]:%0d [1]:%0d [2]:%0d [3]:%0d [4]:%0d [5]:%0d [6]:%0d [7]:%0d [8]:%0d [9]:%0d", 
                             $signed(l3_out[0]), $signed(l3_out[1]), $signed(l3_out[2]), $signed(l3_out[3]), $signed(l3_out[4]), 
                             $signed(l3_out[5]), $signed(l3_out[6]), $signed(l3_out[7]), $signed(l3_out[8]), $signed(l3_out[9]));

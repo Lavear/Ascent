@@ -1,0 +1,1 @@
+set_db lib_search_path /home/EIvlsi3/Digital/lib; set_db library {typical.lib}; set_db init_hdl_search_path ../rtl/; read_hdl -sv multiplier/loa_mult.sv; elaborate loa_mult; syn_generic; syn_map; syn_opt; report_area > reports/area_1_3_loa.rpt; report_power > reports/power_1_3_loa.rpt; report_timing > reports/timing_1_3_loa.rpt; exit

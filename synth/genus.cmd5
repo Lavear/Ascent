@@ -1,0 +1,13 @@
+# Cadence Genus(TM) Synthesis Solution, Version 17.21-s010_1, built Feb  7 2018
+
+# Date: Thu May 14 12:07:39 2026
+# Host: cadence_rvce (x86_64 w/Linux 3.10.0-327.el7.x86_64) (6cores*12cpus*1physical cpu*Intel(R) Core(TM) i5-10500 CPU @ 3.10GHz 12288KB)
+# OS:   Red Hat Enterprise Linux Server release 7.2 (Maipo)
+
+source synth.tcl
+read_vcd ../sim/waves/tb_ascent_top.vcd
+report_area > reports/area_report.rpt
+report_power > reports/power_report.rpt
+report_timing > reports/timing_report.rpt
+report_qor > reports/qor_report.rpt
+exit
